@@ -244,7 +244,8 @@ async function handleIncoming(body) {
   await reply(phone, aiReply);
 }
 
-app.post('/webhook', (req, res) => {
+// Also accepts a named path (e.g. /webhook/askmitra) so the URL configured in Evolution can carry a suffix.
+app.post(['/webhook', '/webhook/:name'], (req, res) => {
   logWebhookSample(req.body);
   // Acknowledge Evolution right away; waitUntil keeps the Vercel function alive until the reply is sent.
   waitUntil(
