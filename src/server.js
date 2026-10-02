@@ -41,9 +41,10 @@ const PRICE_RESPONSE = {
   ta: `உங்கள் ஆர்வத்திற்கு நன்றி! எங்கள் குழு விரைவில் துல்லியமான விவரங்களுடன் உங்களை தொடர்பு கொள்ளும். உடனடி உதவிக்கு ${config.BUSINESS_PHONE} என்ற எண்ணில் அழைக்கவும்.`,
 };
 
-const AFTER_HOURS = {
-  en: `Thank you for messaging *${config.BUSINESS_NAME}!* Our working hours are Mon-Sat 9:30 AM to 9:00 PM and Sunday 9:00 AM to 2:00 PM. We've noted your message and will respond first thing during business hours. For urgent needs, please call ${config.BUSINESS_PHONE}.`,
-  ta: `*சக்ஸஸ் கம்ப்யூடெக்*கிற்கு செய்தி அனுப்பியதற்கு நன்றி! எங்கள் பணி நேரம் திங்கள்-சனி காலை 9:30 முதல் இரவு 9:00 வரை, ஞாயிறு காலை 9:00 முதல் மதியம் 2:00 வரை. உங்கள் செய்தி பதிவு செய்யப்பட்டுள்ளது, பணி நேரத்தில் உடனடியாக பதிலளிக்கப்படும். அவசரத்திற்கு ${config.BUSINESS_PHONE} அழைக்கவும்.`,
+// Appended to the AI answer outside working hours, so customers still get a real reply at any time.
+const AFTER_HOURS_NOTE = {
+  en: `🕘 _We're closed right now (Mon-Sat 9:30 AM to 9:00 PM, Sunday 9:00 AM to 2:00 PM). Our team will follow up as soon as we open._`,
+  ta: `🕘 _தற்போது எங்கள் கடை மூடப்பட்டுள்ளது (திங்கள்-சனி காலை 9:30 முதல் இரவு 9:00 வரை, ஞாயிறு காலை 9:00 முதல் மதியம் 2:00 வரை). கடை திறந்ததும் எங்கள் குழு உங்களை தொடர்பு கொள்ளும்._`,
 };
 
 const DOC_RECEIVED = {
@@ -236,12 +237,10 @@ async function handleIncoming(body) {
     return;
   }
 
-  if (!isWithinWorkingHours()) return reply(phone, AFTER_HOURS[lang]);
-
   // History already includes the message we just stored.
   const history = await db.getConversationHistory(phone, 20);
   const aiReply = await aiAgent.generateResponse(history);
-  await reply(phone, aiReply);
+  await reply(phone, isWithinWorkingHours() ? aiReply : `${aiReply}\n\n${AFTER_HOURS_NOTE[lang]}`);
 }
 
 // Also accepts a named path (e.g. /webhook/askmitra) so the URL configured in Evolution can carry a suffix.
