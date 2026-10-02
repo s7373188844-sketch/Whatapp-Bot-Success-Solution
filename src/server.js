@@ -8,7 +8,6 @@ const db = require('./database');
 const EvolutionApi = require('./evolutionApi');
 const AIAgent = require('./aiAgent');
 const { getLanguage } = require('./languageDetector');
-const { isWithinWorkingHours } = require('./timeUtils');
 
 const REQUIRED_ENV = ['DATABASE_URL', 'EVOLUTION_API_URL', 'EVOLUTION_API_KEY', 'EVOLUTION_INSTANCE', 'GEMINI_API_KEY', 'DASHBOARD_PASSWORD'];
 const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
@@ -39,12 +38,6 @@ const OWNER_ID = config.OWNER_PHONE.replace(/[^0-9]/g, '');
 const PRICE_RESPONSE = {
   en: `Thank you for your interest! Our team will get back to you shortly with the exact details. You can also call us directly at ${config.BUSINESS_PHONE} for immediate assistance.`,
   ta: `உங்கள் ஆர்வத்திற்கு நன்றி! எங்கள் குழு விரைவில் துல்லியமான விவரங்களுடன் உங்களை தொடர்பு கொள்ளும். உடனடி உதவிக்கு ${config.BUSINESS_PHONE} என்ற எண்ணில் அழைக்கவும்.`,
-};
-
-// Appended to the AI answer outside working hours, so customers still get a real reply at any time.
-const AFTER_HOURS_NOTE = {
-  en: `🕘 _We're closed right now (Mon-Sat 9:30 AM to 9:00 PM, Sunday 9:00 AM to 2:00 PM). Our team will follow up as soon as we open._`,
-  ta: `🕘 _தற்போது எங்கள் கடை மூடப்பட்டுள்ளது (திங்கள்-சனி காலை 9:30 முதல் இரவு 9:00 வரை, ஞாயிறு காலை 9:00 முதல் மதியம் 2:00 வரை). கடை திறந்ததும் எங்கள் குழு உங்களை தொடர்பு கொள்ளும்._`,
 };
 
 const DOC_RECEIVED = {
@@ -240,7 +233,8 @@ async function handleIncoming(body) {
   // History already includes the message we just stored.
   const history = await db.getConversationHistory(phone, 20);
   const aiReply = await aiAgent.generateResponse(history);
-  await reply(phone, isWithinWorkingHours() ? aiReply : `${aiReply}\n\n${AFTER_HOURS_NOTE[lang]}`);
+  // Replies 24/7: no working-hours check.
+  await reply(phone, aiReply);
 }
 
 // Also accepts a named path (e.g. /webhook/askmitra) so the URL configured in Evolution can carry a suffix.
