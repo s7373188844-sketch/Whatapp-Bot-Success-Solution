@@ -1,8 +1,8 @@
 require('dotenv').config();
 
 const express = require('express');
-const fs = require('fs');
 const path = require('path');
+const { waitUntil } = require('@vercel/functions');
 const config = require('./config');
 const db = require('./database');
 const EvolutionApi = require('./evolutionApi');
@@ -10,16 +10,20 @@ const AIAgent = require('./aiAgent');
 const { getLanguage } = require('./languageDetector');
 const { isWithinWorkingHours } = require('./timeUtils');
 
-for (const key of ['EVOLUTION_API_URL', 'EVOLUTION_API_KEY', 'EVOLUTION_INSTANCE', 'GEMINI_API_KEY', 'DASHBOARD_PASSWORD']) {
-  if (!process.env[key]) {
-    console.error(`[CONFIG] Missing required env var ${key}`);
-    process.exit(1);
-  }
+const REQUIRED_ENV = ['DATABASE_URL', 'EVOLUTION_API_URL', 'EVOLUTION_API_KEY', 'EVOLUTION_INSTANCE', 'GEMINI_API_KEY', 'DASHBOARD_PASSWORD'];
+const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
+if (missingEnv.length) {
+  // Throwing (not process.exit) so Vercel shows the reason in the function logs.
+  throw new Error(`[CONFIG] Missing required env vars: ${missingEnv.join(', ')}`);
 }
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// On Vercel, public/ is served by the CDN; these cover local runs and any request that falls through to the function.
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
+app.use(express.static(PUBLIC_DIR));
 
 const evolution = new EvolutionApi({
   baseUrl: process.env.EVOLUTION_API_URL,
@@ -31,7 +35,6 @@ const evolution = new EvolutionApi({
 const aiAgent = new AIAgent(process.env.GEMINI_API_KEY, process.env.GEMINI_MODEL);
 
 const OWNER_ID = config.OWNER_PHONE.replace(/[^0-9]/g, '');
-const processedMessages = new Set();
 
 const PRICE_RESPONSE = {
   en: `Thank you for your interest! Our team will get back to you shortly with the exact details. You can also call us directly at ${config.BUSINESS_PHONE} for immediate assistance.`,
@@ -132,37 +135,35 @@ function isMedia(m) {
   return !!(m.imageMessage || m.documentMessage || m.audioMessage || m.videoMessage || m.documentWithCaptionMessage);
 }
 
+// Payload samples go to the function logs (Vercel's filesystem is read-only); first 20 per instance.
 let samplesLogged = 0;
 function logWebhookSample(body) {
   if (samplesLogged >= 20) return;
   samplesLogged++;
-  try {
-    fs.appendFileSync(path.join(db.DATA_DIR, 'webhook-samples.log'), JSON.stringify(body) + '\n');
-  } catch {}
+  console.log('[WEBHOOK SAMPLE]', JSON.stringify(body).substring(0, 3000));
 }
 
 async function reply(to, text) {
   await evolution.sendText(to, text);
-  db.storeOutboundMessage(to, text);
+  await db.storeOutboundMessage(to, text);
 }
 
 // ── Owner commands (sent from the business phone to its own "Message yourself" chat) ──
-function handleOwnerCommand(text) {
+async function handleOwnerCommand(text) {
   const cmd = text.toLowerCase().trim();
   if (cmd === '#stats') {
-    const s = db.getStats();
+    const s = await db.getStats();
     return `📊 *Lead Dashboard*\n\nTotal Leads: ${s.totalLeads}\nToday's New: ${s.todayLeads}\nHot Leads: ${s.hotLeads}\nPending Follow-up: ${s.pendingFollowUp}\nTotal Messages: ${s.totalMessages}`;
   }
   if (cmd === '#hot') {
-    const leads = db.getHotLeads();
+    const leads = await db.getHotLeads();
     if (!leads.length) return '✅ No pending hot leads. All follow-ups done!';
     return '🔥 *Hot Leads (Pending):*\n\n' + leads.slice(0, 15).map((l) => {
-      const services = JSON.parse(l.services_interested || '[]');
-      return `• *${l.id}* | ${l.phone} (${l.name})\n  ${services.join(', ') || 'General'} | Price asks: ${l.price_inquiry_count}`;
+      return `• *${l.id}* | ${l.phone} (${l.name})\n  ${l.services_interested.join(', ') || 'General'} | Price asks: ${l.price_inquiry_count}`;
     }).join('\n\n');
   }
   if (cmd === '#leads') {
-    const leads = db.getAllLeads(20);
+    const leads = await db.getAllLeads(20);
     if (!leads.length) return '📋 No leads recorded yet.';
     return '📋 *Recent Leads:*\n\n' + leads.map((l) => {
       const icon = l.status === 'hot_lead' ? '🔥' : l.status === 'followed_up' ? '✅' : '🆕';
@@ -171,15 +172,14 @@ function handleOwnerCommand(text) {
   }
   if (cmd.startsWith('#done ')) {
     const p = cmd.slice(6).trim();
-    const lead = db.markFollowUpDone(p);
+    const lead = await db.markFollowUpDone(p);
     return lead ? `✅ Lead ${lead.id} (${p}) marked as followed up.` : `❌ No lead found: ${p}`;
   }
   if (cmd.startsWith('#find ')) {
     const p = cmd.slice(6).trim();
-    const lead = db.getLeadByPhone(p);
+    const lead = await db.getLeadByPhone(p);
     if (!lead) return `❌ No lead found: ${p}`;
-    const services = JSON.parse(lead.services_interested || '[]');
-    return `📋 *Lead Details*\n\nID: ${lead.id}\nPhone: ${lead.phone}\nName: ${lead.name}\nStatus: ${lead.status}\nMessages: ${lead.message_count}\nPrice Asks: ${lead.price_inquiry_count}\nServices: ${services.join(', ') || 'None'}\nFollow-up: ${lead.follow_up_done ? 'Done' : 'Pending'}`;
+    return `📋 *Lead Details*\n\nID: ${lead.id}\nPhone: ${lead.phone}\nName: ${lead.name}\nStatus: ${lead.status}\nMessages: ${lead.message_count}\nPrice Asks: ${lead.price_inquiry_count}\nServices: ${lead.services_interested.join(', ') || 'None'}\nFollow-up: ${lead.follow_up_done ? 'Done' : 'Pending'}`;
   }
   if (cmd === '#help') {
     return `🤖 *Bot Owner Commands:*\n\n#stats — Dashboard summary\n#hot — Pending hot leads\n#leads — Recent 20 leads\n#find <phone> — Lead details\n#done <phone> — Mark follow-up done`;
@@ -191,17 +191,15 @@ async function handleIncoming(body) {
   const msg = parseIncoming(body);
   if (!msg || !msg.id || !msg.contactId || msg.isGroup) return;
 
-  if (processedMessages.has(msg.id)) return;
-  processedMessages.add(msg.id);
-  if (processedMessages.size > 5000) processedMessages.clear();
-
   const text = extractText(msg.message);
   const media = isMedia(msg.message);
   if (!text && !media) return;
 
+  if (!(await db.claimMessage(msg.id))) return;
+
   if (msg.fromMe) {
     if (msg.contactId === OWNER_ID && text && text.trim().startsWith('#')) {
-      const out = handleOwnerCommand(text);
+      const out = await handleOwnerCommand(text);
       if (out) await evolution.sendText(OWNER_ID, out);
     }
     return;
@@ -215,7 +213,7 @@ async function handleIncoming(body) {
 
   console.log(`[MSG] ${phone} (${msg.pushName || '?'}) | ${lang} | ${service || '-'} | ${customerMessage.substring(0, 60)}`);
 
-  db.addOrUpdateLead({
+  const lead = await db.addOrUpdateLead({
     phone,
     name: msg.pushName,
     service,
@@ -227,29 +225,34 @@ async function handleIncoming(body) {
   if (media) return reply(phone, DOC_RECEIVED[lang]);
 
   if (priceQuery) {
-    await reply(phone, PRICE_RESPONSE[lang]);
-    const lead = db.getLeadByPhone(phone);
-    evolution.sendText(
-      OWNER_ID,
-      `📩 *Price Enquiry Alert*\n\nLead: ${lead?.id}\nFrom: ${phone} (${msg.pushName || 'Unknown'})\nServices: ${JSON.parse(lead?.services_interested || '[]').join(', ') || 'General'}\nMessage: ${customerMessage}\n\nPlease follow up.`
-    ).catch((e) => console.error('[NOTIFY] Owner notification failed:', e.message));
+    // Awaited (not fire-and-forget) so the serverless function doesn't freeze before the alert goes out.
+    await Promise.all([
+      reply(phone, PRICE_RESPONSE[lang]),
+      evolution.sendText(
+        OWNER_ID,
+        `📩 *Price Enquiry Alert*\n\nLead: ${lead?.id}\nFrom: ${phone} (${msg.pushName || 'Unknown'})\nServices: ${lead?.services_interested?.join(', ') || 'General'}\nMessage: ${customerMessage}\n\nPlease follow up.`
+      ).catch((e) => console.error('[NOTIFY] Owner notification failed:', e.message)),
+    ]);
     return;
   }
 
   if (!isWithinWorkingHours()) return reply(phone, AFTER_HOURS[lang]);
 
   // History already includes the message we just stored.
-  const history = db.getConversationHistory(phone, 20);
+  const history = await db.getConversationHistory(phone, 20);
   const aiReply = await aiAgent.generateResponse(history);
   await reply(phone, aiReply);
 }
 
 app.post('/webhook', (req, res) => {
-  res.sendStatus(200);
   logWebhookSample(req.body);
-  handleIncoming(req.body).catch((err) => {
-    console.error('[WEBHOOK] Error:', err.response?.data || err.message);
-  });
+  // Acknowledge Evolution right away; waitUntil keeps the Vercel function alive until the reply is sent.
+  waitUntil(
+    handleIncoming(req.body).catch((err) => {
+      console.error('[WEBHOOK] Error:', err.response?.data || err.message);
+    })
+  );
+  res.sendStatus(200);
 });
 
 // ── Dashboard API ──
@@ -259,7 +262,12 @@ function auth(req, res, next) {
   next();
 }
 
-const parseLead = (l) => ({ ...l, services_interested: JSON.parse(l.services_interested || '[]') });
+// Express 4 doesn't catch rejected promises, so async handlers report DB errors through this.
+const route = (fn) => (req, res) =>
+  fn(req, res).catch((err) => {
+    console.error(`[API] ${req.method} ${req.path}:`, err.message);
+    res.status(500).json({ error: err.message });
+  });
 
 app.post('/api/login', (req, res) => {
   if (req.body?.password === process.env.DASHBOARD_PASSWORD) {
@@ -268,32 +276,32 @@ app.post('/api/login', (req, res) => {
   res.status(401).json({ error: 'Invalid password' });
 });
 
-app.get('/api/stats', auth, (req, res) => res.json(db.getStats()));
+app.get('/api/stats', auth, route(async (req, res) => res.json(await db.getStats())));
 
-app.get('/api/leads', auth, (req, res) => {
+app.get('/api/leads', auth, route(async (req, res) => {
   const { search, status } = req.query;
-  let leads = search ? db.searchLeads(search) : db.getAllLeads(200);
+  let leads = search ? await db.searchLeads(search) : await db.getAllLeads(200);
   if (status && status !== 'all') leads = leads.filter((l) => l.status === status);
-  res.json(leads.map(parseLead));
-});
+  res.json(leads);
+}));
 
-app.get('/api/leads/:phone', auth, (req, res) => {
-  const lead = db.getLeadByPhone(req.params.phone);
+app.get('/api/leads/:phone', auth, route(async (req, res) => {
+  const [lead, messages] = await Promise.all([db.getLeadByPhone(req.params.phone), db.getMessages(req.params.phone, 200)]);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
-  res.json({ lead: parseLead(lead), messages: db.getMessages(req.params.phone, 200) });
-});
+  res.json({ lead, messages });
+}));
 
-app.post('/api/leads/:phone/follow-up', auth, (req, res) => {
-  const lead = db.markFollowUpDone(req.params.phone);
+app.post('/api/leads/:phone/follow-up', auth, route(async (req, res) => {
+  const lead = await db.markFollowUpDone(req.params.phone);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
-  res.json(parseLead(lead));
-});
+  res.json(lead);
+}));
 
-app.post('/api/leads/:phone/notes', auth, (req, res) => {
-  const lead = db.updateLeadNotes(req.params.phone, req.body.notes || '');
+app.post('/api/leads/:phone/notes', auth, route(async (req, res) => {
+  const lead = await db.updateLeadNotes(req.params.phone, req.body.notes || '');
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
-  res.json(parseLead(lead));
-});
+  res.json(lead);
+}));
 
 app.post('/api/send-message', auth, async (req, res) => {
   try {
@@ -325,24 +333,29 @@ app.post('/api/setup-webhook', auth, async (req, res) => {
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
-  console.log(`[INIT] ${config.BUSINESS_NAME} bot listening on http://localhost:${PORT}`);
-  try {
-    const status = await evolution.getStatus();
-    console.log(`[INIT] Evolution instance "${process.env.EVOLUTION_INSTANCE}": connected=${status.Connected} loggedIn=${status.LoggedIn}`);
-  } catch (err) {
-    console.error('[INIT] Could not reach Evolution API:', err.response?.data || err.message);
-  }
+// Vercel imports the app and handles requests itself; only open a port for local/long-running hosts.
+module.exports = app;
 
-  // On Railway, register our public webhook automatically.
-  const publicUrl = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN && `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);
-  if (publicUrl) {
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, async () => {
+    console.log(`[INIT] ${config.BUSINESS_NAME} bot listening on http://localhost:${PORT}`);
     try {
-      await evolution.setWebhook(`${publicUrl.replace(/\/+$/, '')}/webhook`);
-      console.log(`[INIT] Webhook registered: ${publicUrl}/webhook`);
+      const status = await evolution.getStatus();
+      console.log(`[INIT] Evolution instance "${process.env.EVOLUTION_INSTANCE}": connected=${status.Connected} loggedIn=${status.LoggedIn}`);
     } catch (err) {
-      console.error('[INIT] Webhook registration failed:', err.response?.data || err.message);
+      console.error('[INIT] Could not reach Evolution API:', err.response?.data || err.message);
     }
-  }
-});
+
+    // On Railway, register our public webhook automatically. (On Vercel, use the dashboard's Webhook Setup.)
+    const publicUrl = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN && `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);
+    if (publicUrl) {
+      try {
+        await evolution.setWebhook(`${publicUrl.replace(/\/+$/, '')}/webhook`);
+        console.log(`[INIT] Webhook registered: ${publicUrl}/webhook`);
+      } catch (err) {
+        console.error('[INIT] Webhook registration failed:', err.response?.data || err.message);
+      }
+    }
+  });
+}

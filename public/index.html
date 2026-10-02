@@ -407,7 +407,11 @@
       }
     }
 
-    function openWebhookModal() { document.getElementById('webhook-modal').classList.add('active'); }
+    function openWebhookModal() {
+      const input = document.getElementById('webhook-url');
+      if (!input.value) input.value = location.origin + '/webhook';
+      document.getElementById('webhook-modal').classList.add('active');
+    }
     function closeWebhookModal() { document.getElementById('webhook-modal').classList.remove('active'); }
 
     async function saveWebhook() {
