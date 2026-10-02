@@ -207,14 +207,23 @@ async function handleIncoming(body) {
 
   console.log(`[MSG] ${phone} (${msg.pushName || '?'}) | ${lang} | ${service || '-'} | ${customerMessage.substring(0, 60)}`);
 
-  const lead = await db.addOrUpdateLead({
-    phone,
-    name: msg.pushName,
-    service,
-    message: customerMessage,
-    type: priceQuery ? 'price_inquiry' : media ? 'document' : 'inquiry',
-    messageType: media ? 'media' : 'text',
-  });
+  const [lead, settings] = await Promise.all([
+    db.addOrUpdateLead({
+      phone,
+      name: msg.pushName,
+      service,
+      message: customerMessage,
+      type: priceQuery ? 'price_inquiry' : media ? 'document' : 'inquiry',
+      messageType: media ? 'media' : 'text',
+    }),
+    db.getSettings(),
+  ]);
+
+  // The message is saved either way, so it still shows in the dashboard.
+  if (!settings.autoReply) return console.log(`[SKIP] ${phone}: auto-reply is off`);
+  if (settings.testMode && !settings.testNumbers.includes(phone)) {
+    return console.log(`[SKIP] ${phone}: test mode, not a test number`);
+  }
 
   if (media) return reply(phone, DOC_RECEIVED[lang]);
 
@@ -232,7 +241,7 @@ async function handleIncoming(body) {
 
   // History already includes the message we just stored.
   const history = await db.getConversationHistory(phone, 20);
-  const aiReply = await aiAgent.generateResponse(history);
+  const aiReply = await aiAgent.generateResponse(history, { extraInstructions: settings.extraInstructions });
   // Replies 24/7: no working-hours check.
   await reply(phone, aiReply);
 }
@@ -307,6 +316,29 @@ app.post('/api/send-message', auth, async (req, res) => {
     res.status(500).json({ error: err.response?.data?.message || err.message });
   }
 });
+
+// "+91 98765-43210" / "9876543210" -> "919876543210" (WhatsApp IDs are country code + number).
+function normalizePhone(input) {
+  const digits = String(input).replace(/\D/g, '');
+  return digits.length === 10 ? `91${digits}` : digits;
+}
+
+app.get('/api/settings', auth, route(async (req, res) => res.json(await db.getSettings())));
+
+app.post('/api/settings', auth, route(async (req, res) => {
+  const { autoReply, testMode, testNumbers, extraInstructions } = req.body || {};
+  const changes = {};
+  if (typeof autoReply === 'boolean') changes.autoReply = autoReply;
+  if (typeof testMode === 'boolean') changes.testMode = testMode;
+  if (Array.isArray(testNumbers)) {
+    changes.testNumbers = [...new Set(testNumbers.map(normalizePhone).filter((n) => n.length >= 10 && n.length <= 15))];
+  }
+  if (typeof extraInstructions === 'string') changes.extraInstructions = extraInstructions.slice(0, 4000);
+  if (changes.testMode && !(changes.testNumbers ?? (await db.getSettings()).testNumbers).length) {
+    return res.status(400).json({ error: 'Add at least one test number before turning on test mode' });
+  }
+  res.json(await db.saveSettings(changes));
+}));
 
 app.get('/api/connection', auth, async (req, res) => {
   try {

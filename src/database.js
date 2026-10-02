@@ -44,6 +44,12 @@ function ready() {
           id TEXT PRIMARY KEY,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value JSONB NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`;
       await sql`CREATE INDEX IF NOT EXISTS idx_messages_phone ON messages(lead_phone, id)`;
       await sql`CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status)`;
       await sql`CREATE INDEX IF NOT EXISTS idx_leads_last_contact ON leads(last_contact DESC)`;
@@ -181,7 +187,31 @@ async function updateLeadNotes(phone, notes) {
   return lead || null;
 }
 
+// Bot behaviour settings edited from the dashboard; stored as one JSON row so new fields need no migration.
+const DEFAULT_SETTINGS = {
+  autoReply: true, // master switch for all automatic replies
+  testMode: false, // when on, only testNumbers get replies
+  testNumbers: [],
+  extraInstructions: '', // appended to the AI system prompt
+};
+
+async function getSettings() {
+  await ready();
+  const [row] = await sql`SELECT value FROM settings WHERE key = 'bot'`;
+  return { ...DEFAULT_SETTINGS, ...(row?.value || {}) };
+}
+
+async function saveSettings(changes) {
+  const merged = { ...(await getSettings()), ...changes };
+  await sql`
+    INSERT INTO settings (key, value) VALUES ('bot', ${JSON.stringify(merged)}::jsonb)
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;
+  return merged;
+}
+
 module.exports = {
+  getSettings,
+  saveSettings,
   claimMessage,
   addOrUpdateLead,
   storeOutboundMessage,

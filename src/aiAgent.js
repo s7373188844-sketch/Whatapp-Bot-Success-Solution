@@ -61,30 +61,33 @@ When customer sends a number (1-10), show the relevant sub-category menu.
 
 class AIAgent {
   constructor(apiKey, modelName) {
-    const genAI = new GoogleGenerativeAI(apiKey);
+    this.genAI = new GoogleGenerativeAI(apiKey);
     // Second model is a fallback for 503 "high demand" / 429 rate-limit responses.
-    this.models = [modelName || 'gemini-flash-latest', 'gemini-flash-lite-latest'].map((model) =>
-      genAI.getGenerativeModel({ model, systemInstruction: SYSTEM_PROMPT }, { timeout: 30000 })
-    );
+    this.modelNames = [modelName || 'gemini-flash-latest', 'gemini-flash-lite-latest'];
   }
 
-  async generate(contents) {
+  async generate(contents, extraInstructions) {
+    // Owner's dashboard instructions come after the core rules; the no-price rule is enforced in code regardless.
+    const systemInstruction = extraInstructions?.trim()
+      ? `${SYSTEM_PROMPT}\n\nADDITIONAL INSTRUCTIONS FROM THE SHOP OWNER:\n${extraInstructions.trim()}`
+      : SYSTEM_PROMPT;
     let lastErr;
-    for (const model of this.models) {
+    for (const name of this.modelNames) {
+      const model = this.genAI.getGenerativeModel({ model: name, systemInstruction }, { timeout: 30000 });
       try {
         const result = await model.generateContent({ contents });
         return result.response.text()?.trim();
       } catch (err) {
         lastErr = err;
         if (!/\b(503|429|500)\b/.test(err.message)) break;
-        console.warn(`[AI] ${model.model} unavailable, trying fallback model`);
+        console.warn(`[AI] ${name} unavailable, trying fallback model`);
       }
     }
     throw lastErr;
   }
 
   // `history` is chronological and must end with the customer's latest message.
-  async generateResponse(history) {
+  async generateResponse(history, { extraInstructions } = {}) {
     const lastInbound = [...history].reverse().find((m) => m.direction === 'inbound');
     const latestText = lastInbound?.message || '';
     try {
@@ -101,7 +104,7 @@ class AIAgent {
         return this.getFallbackResponse(latestText);
       }
 
-      const text = await this.generate(contents);
+      const text = await this.generate(contents, extraInstructions);
       return text || this.getFallbackResponse(latestText);
     } catch (err) {
       console.error('[AI] Gemini API error:', err.message);
