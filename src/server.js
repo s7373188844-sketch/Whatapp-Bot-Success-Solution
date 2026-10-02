@@ -8,6 +8,7 @@ const db = require('./database');
 const EvolutionApi = require('./evolutionApi');
 const AIAgent = require('./aiAgent');
 const { getLanguage } = require('./languageDetector');
+const { getEsevaiReply } = require('./esevai');
 
 const REQUIRED_ENV = ['DATABASE_URL', 'EVOLUTION_API_URL', 'EVOLUTION_API_KEY', 'EVOLUTION_INSTANCE', 'GEMINI_API_KEY', 'DASHBOARD_PASSWORD'];
 const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
@@ -45,6 +46,17 @@ const DOC_RECEIVED = {
   ta: `உங்கள் ஆவணங்கள் பெறப்பட்டன! ✅ எங்கள் குழு இப்போது சரிபார்த்துக் கொண்டிருக்கிறது. தகுதியை உறுதி செய்து அடுத்த நடவடிக்கை குறித்து விரைவில் தெரிவிப்போம். *சக்ஸஸ் கம்ப்யூடெக்*கை தேர்ந்தெடுத்ததற்கு நன்றி!`,
 };
 
+const VOICE_RECEIVED = {
+  en: `We've received your voice message! 🎙️ Our team will listen and get back to you shortly. For a faster reply, please type your question here.`,
+  ta: `உங்கள் குரல் செய்தி கிடைத்தது! 🎙️ எங்கள் குழு கேட்டு விரைவில் பதிலளிக்கும். விரைவான பதிலுக்கு உங்கள் கேள்வியை இங்கே டைப் செய்யவும்.`,
+};
+
+// Canned replies (documents, voice, e-Sevai lists) go out at most once per number in this window.
+const CANNED_REPEAT_MINUTES = 30;
+// Loop guard: stops ping-pong with other auto-reply bots and floods from one number.
+const LOOP_WINDOW_MINUTES = 10;
+const MAX_REPLIES_PER_WINDOW = 5;
+
 function isPriceQuery(text) {
   const lower = text.toLowerCase();
   return config.PRICE_TRIGGER_WORDS.some((w) => {
@@ -77,6 +89,11 @@ function splitJid(jid) {
   return { user: userPart.split(':')[0], server };
 }
 
+// Channels (…@newsletter), status updates (status@broadcast) and broadcast lists aren't customer chats.
+function isBroadcastJid(jid) {
+  return jid?.server === 'newsletter' || jid?.server === 'broadcast';
+}
+
 // Normalizes Evolution Go (whatsmeow: data.Info/data.Message) and Evolution v2 (data.key/data.message) payloads.
 function parseIncoming(body) {
   const data = body?.data || body;
@@ -92,6 +109,7 @@ function parseIncoming(body) {
       id: info.ID,
       fromMe: !!info.IsFromMe,
       isGroup: !!info.IsGroup || chat?.server === 'g.us',
+      isBroadcast: isBroadcastJid(chat),
       contactId: contact ? (contact.server === 's.whatsapp.net' ? contact.user : `${contact.user}@${contact.server}`) : null,
       pushName: info.PushName,
       message: data.Message || {},
@@ -104,6 +122,7 @@ function parseIncoming(body) {
       id: data.key.id,
       fromMe: !!data.key.fromMe,
       isGroup: chat?.server === 'g.us',
+      isBroadcast: isBroadcastJid(chat),
       contactId: chat ? (chat.server === 's.whatsapp.net' ? chat.user : `${chat.user}@${chat.server}`) : null,
       pushName: data.pushName,
       message: data.message || {},
@@ -119,6 +138,7 @@ function extractText(m) {
     m.imageMessage?.caption ||
     m.documentMessage?.caption ||
     m.videoMessage?.caption ||
+    m.documentWithCaptionMessage?.message?.documentMessage?.caption ||
     m.buttonsResponseMessage?.selectedDisplayText ||
     m.listResponseMessage?.title ||
     null
@@ -183,7 +203,7 @@ async function handleOwnerCommand(text) {
 
 async function handleIncoming(body) {
   const msg = parseIncoming(body);
-  if (!msg || !msg.id || !msg.contactId || msg.isGroup) return;
+  if (!msg || !msg.id || !msg.contactId || msg.isGroup || msg.isBroadcast) return;
 
   const text = extractText(msg.message);
   const media = isMedia(msg.message);
@@ -200,10 +220,13 @@ async function handleIncoming(body) {
   }
 
   const phone = msg.contactId;
-  const customerMessage = text || '[Media/Document]';
+  // A photo/document with a caption is answered from its caption; the prefix tells the AI something was attached.
+  const mediaLabel = msg.message.audioMessage ? '[Voice message]' : '[Media/Document]';
+  const customerMessage = media ? (text ? `${mediaLabel} ${text}` : mediaLabel) : text;
   const lang = getLanguage(customerMessage);
-  const service = detectService(customerMessage);
   const priceQuery = !!text && isPriceQuery(text);
+  const esevai = text ? getEsevaiReply(text, lang) : null;
+  const service = esevai?.service || detectService(customerMessage);
 
   console.log(`[MSG] ${phone} (${msg.pushName || '?'}) | ${lang} | ${service || '-'} | ${customerMessage.substring(0, 60)}`);
 
@@ -225,7 +248,25 @@ async function handleIncoming(body) {
     return console.log(`[SKIP] ${phone}: test mode, not a test number`);
   }
 
-  if (media) return reply(phone, DOC_RECEIVED[lang]);
+  // Loop guard. The current message is already stored, so a count above 1 means it's a repeat.
+  const [recentReplies, sameMessageCount] = await Promise.all([
+    db.countRecentMessages(phone, 'outbound', LOOP_WINDOW_MINUTES),
+    db.countRecentMessages(phone, 'inbound', LOOP_WINDOW_MINUTES, customerMessage),
+  ]);
+  if (recentReplies >= MAX_REPLIES_PER_WINDOW) {
+    return console.log(`[SKIP] ${phone}: ${recentReplies} replies in ${LOOP_WINDOW_MINUTES} min (loop guard)`);
+  }
+  // Caption-less media is rate-limited by its own once-per-window acknowledgement below.
+  if (text && sameMessageCount > 1) return console.log(`[SKIP] ${phone}: repeated message`);
+
+  const sentRecently = async (cannedText) =>
+    (await db.countRecentMessages(phone, 'outbound', CANNED_REPEAT_MINUTES, cannedText)) > 0;
+
+  if (media && !text) {
+    const canned = msg.message.audioMessage ? VOICE_RECEIVED[lang] : DOC_RECEIVED[lang];
+    if (await sentRecently(canned)) return console.log(`[SKIP] ${phone}: media acknowledgement already sent`);
+    return reply(phone, canned);
+  }
 
   if (priceQuery) {
     // Awaited (not fire-and-forget) so the serverless function doesn't freeze before the alert goes out.
@@ -238,6 +279,9 @@ async function handleIncoming(body) {
     ]);
     return;
   }
+
+  // e-Sevai certificate questions get the exact document list; if already sent recently, the AI answers instead.
+  if (esevai && !(await sentRecently(esevai.reply))) return reply(phone, esevai.reply);
 
   // History already includes the message we just stored.
   const history = await db.getConversationHistory(phone, 20);

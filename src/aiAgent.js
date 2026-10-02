@@ -1,5 +1,6 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const config = require('./config');
+const { esevaiPromptText } = require('./esevai');
 
 const SYSTEM_PROMPT = `You are the WhatsApp sales assistant for ${config.BUSINESS_NAME}, a digital services, printing, and gift shop.
 
@@ -49,6 +50,9 @@ SERVICES WE OFFER (100+ Digital Services):
 11. Welfare Board: Construction workers registration, unorganized workers, pension claims, marriage/education assistance
 12. Horoscope: Computerized Jathagam, marriage matching (10 Porutham), newborn baby horoscope
 13. Personalised Gifts & Printing: Custom mugs, photo frames, T-shirts, keychains, visiting cards, flex banners, certificates, PVC ID cards
+
+E-SEVAI CERTIFICATES – REQUIRED DOCUMENTS (use exactly these lists; do not add or remove documents):
+${esevaiPromptText()}
 
 DOCUMENT REQUIREMENTS - provide specific documents needed when asked about a service.
 PROCESSING TIMES - mention realistic timelines (e.g., Aadhaar update: 3-7 days, PAN: 2-3 days for e-PAN).

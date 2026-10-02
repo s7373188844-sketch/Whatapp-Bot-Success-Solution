@@ -122,6 +122,17 @@ async function getConversationHistory(phone, limit = 20) {
   return rows.reverse();
 }
 
+// Messages in one direction for a number within the last `minutes`, optionally only those with exact `message` text.
+async function countRecentMessages(phone, direction, minutes, message = null) {
+  await ready();
+  const [r] = await sql`
+    SELECT COUNT(*)::int AS n FROM messages
+    WHERE lead_phone = ${phone} AND direction = ${direction}
+      AND created_at > now() - make_interval(mins => ${minutes})
+      AND (${message}::text IS NULL OR message = ${message})`;
+  return r.n;
+}
+
 async function getLeadByPhone(phone) {
   await ready();
   const [lead] = await sql`SELECT ${LEAD_COLUMNS} FROM leads WHERE phone = ${phone}`;
@@ -216,6 +227,7 @@ module.exports = {
   addOrUpdateLead,
   storeOutboundMessage,
   getConversationHistory,
+  countRecentMessages,
   getLeadByPhone,
   getAllLeads,
   getHotLeads,
