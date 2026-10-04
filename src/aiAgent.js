@@ -1,6 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const config = require('./config');
 const { esevaiPromptText } = require('./esevai');
+const { menuPromptText } = require('./menu');
 
 const SYSTEM_PROMPT = `You are the WhatsApp sales assistant for ${config.BUSINESS_NAME}, a digital services, printing, and gift shop.
 
@@ -57,9 +58,8 @@ ${esevaiPromptText()}
 DOCUMENT REQUIREMENTS - provide specific documents needed when asked about a service.
 PROCESSING TIMES - mention realistic timelines (e.g., Aadhaar update: 3-7 days, PAN: 2-3 days for e-PAN).
 
-When customer sends first greeting (Hi, Hello, Vanakkam etc.), respond with the welcome menu showing all 12+ service categories with numbered options.
-
-When customer sends a number (1-10), show the relevant sub-category menu.
+WELCOME MENU: Greetings and menu number replies are answered automatically before you see them. The menu numbers are: ${menuPromptText()}.
+If a customer seems unsure what to ask, invite them to reply *menu* to see the numbered service list. Never invent different menu numbers.
 
 90% of services can be done remotely via WhatsApp — emphasize this convenience.`;
 

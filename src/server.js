@@ -9,6 +9,7 @@ const EvolutionApi = require('./evolutionApi');
 const AIAgent = require('./aiAgent');
 const { getLanguage } = require('./languageDetector');
 const { getEsevaiReply } = require('./esevai');
+const { WELCOME_MENU, isGreeting, parseMenuChoice, getMenuItemReply } = require('./menu');
 
 const REQUIRED_ENV = ['DATABASE_URL', 'EVOLUTION_API_URL', 'EVOLUTION_API_KEY', 'EVOLUTION_INSTANCE', 'GEMINI_API_KEY', 'DASHBOARD_PASSWORD'];
 const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
@@ -56,6 +57,8 @@ const CANNED_REPEAT_MINUTES = 30;
 // Loop guard: stops ping-pong with other auto-reply bots and floods from one number.
 const LOOP_WINDOW_MINUTES = 10;
 const MAX_REPLIES_PER_WINDOW = 5;
+// A bare number counts as a menu choice only if we sent the welcome menu within this window.
+const MENU_CHOICE_WINDOW_MINUTES = 24 * 60;
 
 function isPriceQuery(text) {
   const lower = text.toLowerCase();
@@ -226,7 +229,11 @@ async function handleIncoming(body) {
   const lang = getLanguage(customerMessage);
   const priceQuery = !!text && isPriceQuery(text);
   const esevai = text ? getEsevaiReply(text, lang) : null;
-  const service = esevai?.service || detectService(customerMessage);
+  const choice = text ? parseMenuChoice(text) : null;
+  const menuItem = choice && (await db.countRecentMessages(phone, 'outbound', MENU_CHOICE_WINDOW_MINUTES, WELCOME_MENU)) > 0
+    ? getMenuItemReply(choice)
+    : null;
+  const service = menuItem?.service || esevai?.service || detectService(customerMessage);
 
   console.log(`[MSG] ${phone} (${msg.pushName || '?'}) | ${lang} | ${service || '-'} | ${customerMessage.substring(0, 60)}`);
 
@@ -267,6 +274,9 @@ async function handleIncoming(body) {
     if (await sentRecently(canned)) return console.log(`[SKIP] ${phone}: media acknowledgement already sent`);
     return reply(phone, canned);
   }
+
+  if (isGreeting(text)) return reply(phone, WELCOME_MENU);
+  if (menuItem) return reply(phone, menuItem.reply);
 
   if (priceQuery) {
     // Awaited (not fire-and-forget) so the serverless function doesn't freeze before the alert goes out.
