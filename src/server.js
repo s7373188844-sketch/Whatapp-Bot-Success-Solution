@@ -54,6 +54,10 @@ const VOICE_RECEIVED = {
 
 // Canned replies (documents, voice, e-Sevai lists) go out at most once per number in this window.
 const CANNED_REPEAT_MINUTES = 30;
+// Customers send document photos slowly, one by one. We wait until they go quiet, then acknowledge
+// the whole batch once, and at most once per number in the repeat window.
+const MEDIA_QUIET_SECONDS = 90;
+const DOC_ACK_REPEAT_MINUTES = 6 * 60;
 // Loop guard: stops ping-pong with other auto-reply bots and floods from one number.
 const LOOP_WINDOW_MINUTES = 10;
 const MAX_REPLIES_PER_WINDOW = 5;
@@ -263,16 +267,27 @@ async function handleIncoming(body) {
   if (recentReplies >= MAX_REPLIES_PER_WINDOW) {
     return console.log(`[SKIP] ${phone}: ${recentReplies} replies in ${LOOP_WINDOW_MINUTES} min (loop guard)`);
   }
-  // Caption-less media is rate-limited by its own once-per-window acknowledgement below.
+  // Media is rate-limited by its own batched acknowledgement below.
   if (text && sameMessageCount > 1) return console.log(`[SKIP] ${phone}: repeated message`);
 
-  const sentRecently = async (cannedText) =>
-    (await db.countRecentMessages(phone, 'outbound', CANNED_REPEAT_MINUTES, cannedText)) > 0;
+  const sentRecently = async (cannedText, minutes = CANNED_REPEAT_MINUTES) =>
+    (await db.countRecentMessages(phone, 'outbound', minutes, cannedText)) > 0;
 
-  if (media && !text) {
-    const canned = msg.message.audioMessage ? VOICE_RECEIVED[lang] : DOC_RECEIVED[lang];
-    if (await sentRecently(canned)) return console.log(`[SKIP] ${phone}: media acknowledgement already sent`);
-    return reply(phone, canned);
+  if (media && msg.message.audioMessage && !text) {
+    if (await sentRecently(VOICE_RECEIVED[lang])) return console.log(`[SKIP] ${phone}: voice acknowledgement already sent`);
+    return reply(phone, VOICE_RECEIVED[lang]);
+  }
+
+  // Photos/documents (with or without a caption): no reply per photo. Only the last one in a batch acknowledges.
+  if (media) {
+    const myId = await db.lastInboundId(phone);
+    await new Promise((resolve) => setTimeout(resolve, MEDIA_QUIET_SECONDS * 1000));
+    if ((await db.lastInboundId(phone)) !== myId) return console.log(`[SKIP] ${phone}: more messages followed this media`);
+    const alreadyAcked = (await Promise.all(
+      Object.values(DOC_RECEIVED).map((t) => sentRecently(t, DOC_ACK_REPEAT_MINUTES))
+    )).some(Boolean);
+    if (alreadyAcked) return console.log(`[SKIP] ${phone}: document acknowledgement already sent`);
+    return reply(phone, DOC_RECEIVED[lang]);
   }
 
   if (isGreeting(text)) return reply(phone, WELCOME_MENU);

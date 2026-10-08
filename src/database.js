@@ -133,6 +133,13 @@ async function countRecentMessages(phone, direction, minutes, message = null) {
   return r.n;
 }
 
+// ID of the newest inbound message from a number; a change means the customer sent something since.
+async function lastInboundId(phone) {
+  await ready();
+  const [r] = await sql`SELECT max(id) AS id FROM messages WHERE lead_phone = ${phone} AND direction = 'inbound'`;
+  return r.id;
+}
+
 async function getLeadByPhone(phone) {
   await ready();
   const [lead] = await sql`SELECT ${LEAD_COLUMNS} FROM leads WHERE phone = ${phone}`;
@@ -228,6 +235,7 @@ module.exports = {
   storeOutboundMessage,
   getConversationHistory,
   countRecentMessages,
+  lastInboundId,
   getLeadByPhone,
   getAllLeads,
   getHotLeads,

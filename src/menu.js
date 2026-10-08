@@ -6,21 +6,21 @@ const WELCOME_MENU = [
   '',
   'வணக்கம்! 😊 எங்கள் சேவைகளைப் பெற கீழே உள்ள எண்ணை *Reply* செய்யவும்.',
   '',
-  '1️⃣ *Aadhaar / Smart Card*',
-  '2️⃣ *Voter ID*',
-  '3️⃣ *PAN Card*',
-  '4️⃣ *Passport Services*',
-  '5️⃣ *Nalavariyam*',
-  '6️⃣ *FASTag*',
-  '7️⃣ *FSSAI*',
-  '8️⃣ *Employment*',
-  '9️⃣ *UDYAM / MSME*',
-  '🔟 *Temple Darshan & Room Booking*',
-  '1️⃣1️⃣ *GST Services*',
-  '1️⃣2️⃣ *Insurance*',
+  '1️⃣ *Aadhaar*',
+  '2️⃣ *Smart Card*',
+  '3️⃣ *Voter ID*',
+  '4️⃣ *PAN Card*',
+  '5️⃣ *Passport Services*',
+  '6️⃣ *Nalavariyam*',
+  '7️⃣ *FASTag*',
+  '8️⃣ *FSSAI*',
+  '9️⃣ *Employment*',
+  '🔟 *UDYAM / MSME*',
+  '1️⃣1️⃣ *Temple Darshan & Room Booking* (TTD, Sabarimala, Shirdi, Tiruchendur, Palani, etc.)',
+  '1️⃣2️⃣ *Insurance* (2 Wheeler, 4 Wheeler, Star Health & SBI Life Insurance)',
   '1️⃣3️⃣ *PF Claim*',
   '',
-  '📌 *Example:* PAN Card-க்கு `3` என Reply செய்யவும்.',
+  '📌 *Example:* PAN Card-க்கு `4` என Reply செய்யவும்.',
   '',
   '🙏 Thank you for contacting us!',
 ].join('\n');
@@ -29,46 +29,73 @@ const WELCOME_MENU = [
 const MENU_ITEMS = {
   1: {
     service: 'Aadhaar',
-    title: '🪪 *Aadhaar / Smart Card Services*',
-    body: `*Aadhaar:*
-• Address Update (Online)
-• PVC Aadhaar Card Order
-• Document (POI / POA) Update
+    title: '🪪 *Aadhaar Services | ஆதார் சேவைகள்*',
+    body: `✅ *எங்கள் சேவைகள்:*
+• Address Update (முகவரி மாற்றம்) – Online
+• PVC Aadhaar Card Order (பிளாஸ்டிக் கார்டு)
+• Document Update (POI / POA)
 • e-Aadhaar Download & Print
 • Mobile Link Status Check
 • Biometric Lock / Unlock
 
-*Smart Card (Ration Card):*
-• New Smart Card Application
-• Member Add (Marriage / Child Birth)
-• Member Delete (Marriage / Death)
-• Address / Ration Shop Change
-• Family Head Photo & Name Change
-• e-Card Printout & Status
+📄 *தேவையான ஆவணங்கள் (Address Update):*
+• Aadhaar Card
+• Aadhaar-ல் link ஆன mobile number (OTP வரும்)
+• புதிய முகவரி proof – கீழே உள்ளதில் ஏதாவது ஒன்று:
+   ▫️ Voter ID
+   ▫️ Latest Gas Bill
+   ▫️ Bank Passbook (கடைசி statement page உடன்)
 
-📄 *Documents needed:*
-• Aadhaar Card (mobile linked for OTP)
-• Address proof (Voter ID / EB Bill / Bank Passbook)
-• For adding a member: Aadhaar of all members + Birth / Marriage certificate
+🙋 *முகவரி proof இல்லையா?* கவலை வேண்டாம், proof இல்லாமலும் முகவரி மாற்றலாம்! மேலும் விவரங்களுக்கு 📞 ${config.BUSINESS_PHONE}-க்கு call செய்யவும்.
 
-⏱️ Aadhaar address update: 3-7 working days. Smart Card approval: 15-30 days.`,
+💡 OTP mobile இருந்தால் கடைக்கு வர தேவையில்லை. இங்கேயே WhatsApp-ல் முடித்துவிடலாம்!`,
   },
   2: {
-    service: 'Voter ID',
-    title: '🗳️ *Voter ID Services*',
-    body: `• New Voter ID (18+ years) – Form 6
-• Address / Constituency Change – Form 8
-• Corrections & e-EPIC Download
+    service: 'Smart Card',
+    title: '🍚 *Smart Card Services | ஸ்மார்ட் கார்டு (ரேஷன் கார்டு) சேவைகள்*',
+    body: `🆕 *புதிய Smart Card*
+⚠️ முதலில் மாப்பிள்ளை வீட்டு கார்டு, பொண்ணு வீட்டு கார்டு இரண்டிலும் உங்கள் பெயரை நீக்க வேண்டும்.
+📄 தேவை:
+• Gas Bill அல்லது Rental Agreement
+• குடும்பத்தில் உள்ள அனைவரின் Aadhaar Card
+⚠️ அனைவரின் Aadhaar-லும் ஒரே முகவரி இருக்க வேண்டும்.
 
-📄 *Documents needed (New Voter ID):*
+➕ *பெயர் சேர்த்தல் (திருமணம் / குழந்தை பிறப்பு)*
+• Smart Card number அல்லது register ஆன mobile number
+• குடும்பத்தில் உள்ள அனைவரின் Aadhaar Card
+• குழந்தைக்கு: Birth Certificate
+• திருமணம் ஆனவருக்கு: Marriage Certificate
+📲 Smart Card mobile number-க்கும், Aadhaar-ல் register ஆன mobile number-க்கும் OTP வரும். இரண்டு phone-ம் கையில் வைத்திருக்கவும்.
+
+➖ *பெயர் நீக்குதல்*
+• திருமணம்: Marriage Certificate
+• இறப்பு: Death Certificate
+
+🏠 *முகவரி மாற்றம்*
+• Recent Gas Bill
+
+👤 *குடும்பத் தலைவர் Photo & பெயர் மாற்றம்*
+• குடும்பத் தலைவர் Photo
 • Aadhaar Card
-• Passport size photo
-• Age proof (10th marksheet / Birth certificate)
-• Family member's Voter ID (for reference)
 
-📄 *For address change:* Aadhaar Card + new address proof`,
+🖨️ e-Card Printout & Status Check-ம் செய்து தருகிறோம்.`,
   },
   3: {
+    service: 'Voter ID',
+    title: '🗳️ *Voter ID Services | வாக்காளர் அடையாள அட்டை சேவைகள்*',
+    body: `🆕 *புதிய Voter ID (18 வயது நிரம்பியவர்கள்)*
+• Aadhaar Card
+• Passport size photo
+• வயது proof: 10th Marksheet அல்லது Birth Certificate
+• குடும்பத்தில் ஒருவரின் Voter ID (reference-க்கு)
+
+🏠 *முகவரி / தொகுதி மாற்றம்*
+• Aadhaar Card
+• புதிய முகவரி proof
+
+✏️ *பெயர் / விவரங்கள் திருத்தம்* & 📥 *e-EPIC (Digital Voter ID) Download*-ம் செய்து தருகிறோம்.`,
+  },
+  4: {
     service: 'PAN Card',
     title: '💳 *PAN Card Services*',
     body: `• New PAN Card
@@ -84,7 +111,7 @@ const MENU_ITEMS = {
 
 ⏱️ e-PAN in 2-3 days, physical card in 7-10 days.`,
   },
-  4: {
+  5: {
     service: 'Passport',
     title: '🛂 *Passport Services*',
     body: `• New Passport / Renewal
@@ -100,7 +127,7 @@ const MENU_ITEMS = {
 
 ⏱️ Appointment within 24 hours. Passport: 15-30 days (Normal), 7-10 days (Tatkal) after verification.`,
   },
-  5: {
+  6: {
     service: 'Welfare Board',
     title: '👷 *Nalavariyam (Welfare Board) Services*',
     body: `• New Construction Workers registration
@@ -117,7 +144,7 @@ const MENU_ITEMS = {
 • Nominee Aadhaar & photo
 • Ration Card / Smart Card copy`,
   },
-  6: {
+  7: {
     service: 'FASTag',
     title: '🚗 *FASTag Services*',
     body: `• New FASTag – Instant Activation
@@ -130,7 +157,7 @@ const MENU_ITEMS = {
 • Passport size photo of owner
 • Vehicle photo (number plate clearly visible)`,
   },
-  7: {
+  8: {
     service: 'FSSAI',
     title: '🍽️ *FSSAI Food Licence*',
     body: `Mandatory for hotels, bakeries, tea stalls, grocery shops & food traders.
@@ -146,7 +173,7 @@ const MENU_ITEMS = {
 
 ⏱️ Processing: 3-7 working days.`,
   },
-  8: {
+  9: {
     service: 'Employment Exchange',
     title: '💼 *Employment Exchange*',
     body: `• New Registration (10th, 12th, ITI, Diploma, Degree)
@@ -160,7 +187,7 @@ const MENU_ITEMS = {
 
 ⏱️ Registration is instant – ID card generated immediately!`,
   },
-  9: {
+  10: {
     service: 'MSME',
     title: '🏭 *UDYAM / MSME Registration*',
     body: `Government certificate for small businesses – useful for bank loans, subsidies & tenders.
@@ -173,7 +200,7 @@ const MENU_ITEMS = {
 
 ⏱️ Certificate generated within 24 hours!`,
   },
-  10: {
+  11: {
     service: 'Temple Booking',
     title: '🛕 *Temple Darshan & Room Booking*',
     body: `• Sabarimala Virtual Queue
@@ -188,29 +215,13 @@ const MENU_ITEMS = {
 • Contact mobile number
 • Preferred dates & time`,
   },
-  11: {
-    service: 'GST',
-    title: '🧾 *GST Services*',
-    body: `• New GST Registration
-• Monthly Returns – GSTR-1, GSTR-3B, CMP-08
-• Annual Return – GSTR-9
-• Cancelled GST Revocation
-
-📄 *Documents needed (Registration):*
-• PAN & Aadhaar of owner / partners
-• Business address proof (rent agreement + EB bill / tax receipt)
-• Bank details (cancelled cheque / statement)
-• Owner passport size photo
-• Nature of business details
-
-⏱️ Registration: 3-5 working days. Returns filed same day.`,
-  },
   12: {
     service: 'Insurance',
     title: '🛡️ *Insurance Services*',
     body: `• Two Wheeler (Comprehensive & Third Party)
 • Four Wheeler & Commercial Vehicles
-• Health / Medical Insurance for families
+• Star Health Insurance (Health / Medical, family plans)
+• SBI Life Insurance
 
 📄 *Documents needed:*
 • RC Book
